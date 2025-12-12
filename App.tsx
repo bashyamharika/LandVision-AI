@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Home from './pages/Home';
 import ListingDetails from './pages/ListingDetails';
@@ -93,14 +92,7 @@ const App: React.FC = () => {
 
   // Helper to safely check API key
   const hasApiKey = () => {
-    try {
-      // @ts-ignore
-      return (typeof process !== 'undefined' && process.env && !!process.env.API_KEY) || 
-             // @ts-ignore
-             (typeof window !== 'undefined' && window.process && window.process.env && !!window.process.env.API_KEY);
-    } catch (e) {
-      return false;
-    }
+    return !!process.env.API_KEY;
   };
 
   // Login handler
@@ -232,7 +224,7 @@ const App: React.FC = () => {
       {!hasApiKey() && (
           <div className="fixed bottom-0 left-0 right-0 bg-indigo-900 text-white text-xs p-2 text-center z-50 opacity-90">
              Demo Mode: AI Features (Visualization, Chat, Estimator) require a Gemini API Key. 
-             If running locally, set <code>process.env.API_KEY</code>.
+             Ensure <code>API_KEY</code> is configured.
           </div>
       )}
     </div>

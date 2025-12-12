@@ -1,5 +1,4 @@
-
-import { GoogleGenAI, Type, SchemaType } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { Listing, VisualizationRequest } from '../types';
 
 // Simple in-memory cache to store AI responses
@@ -10,35 +9,12 @@ const generateCacheKey = (prefix: string, data: any) => {
   return `${prefix}_${JSON.stringify(data)}`;
 };
 
-// Helper to safely get API key
-const getApiKey = () => {
-  try {
-    // @ts-ignore
-    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-      // @ts-ignore
-      return process.env.API_KEY;
-    }
-    // @ts-ignore
-    if (typeof window !== 'undefined' && window.process && window.process.env && window.process.env.API_KEY) {
-        // @ts-ignore
-        return window.process.env.API_KEY;
-    }
-    return '';
-  } catch (e) {
-    return '';
-  }
-};
-
 const getAiClient = () => {
-    const apiKey = getApiKey();
-    if (!apiKey) {
-      console.warn("API Key not found in process.env.API_KEY");
-    }
-    return new GoogleGenAI({ apiKey });
+    return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const generateListingDescription = async (details: Partial<Listing>): Promise<string> => {
-  if (!getApiKey()) return "AI Description unavailable (Missing API Key)";
+  if (!process.env.API_KEY) return "AI Description unavailable (Missing API Key)";
   
   const cacheKey = generateCacheKey('desc', { t: details.type, c: details.location?.city, a: details.area, p: details.price });
   if (AI_CACHE.has(cacheKey)) return AI_CACHE.get(cacheKey);
@@ -76,7 +52,7 @@ export const analyzeRisk = async (listing: Listing): Promise<{ score: number; su
   const cacheKey = generateCacheKey('risk', { id: listing.id });
   if (AI_CACHE.has(cacheKey)) return AI_CACHE.get(cacheKey);
 
-  if (!getApiKey()) return { 
+  if (!process.env.API_KEY) return { 
     score: 85, // Default fallback
     summary: "AI Analysis Unavailable", 
     risks: ["API Key missing for live analysis"] 
@@ -133,7 +109,7 @@ const getStyleDetails = (style: string) => {
 };
 
 export const visualizeLand = async (listing: Listing, request: VisualizationRequest, forceRefresh = false): Promise<string | null> => {
-  if (!getApiKey()) return null;
+  if (!process.env.API_KEY) return null;
   
   // If forceRefresh is true, we add a random seed to the key to bypass cache
   const uniqueSuffix = forceRefresh ? Date.now() : '';
@@ -205,7 +181,7 @@ export const estimateConstructionCost = async (
     quality: 'Economy' | 'Standard' | 'Premium' = 'Standard',
     forceRefresh = false
 ): Promise<any> => {
-  if (!getApiKey()) return null;
+  if (!process.env.API_KEY) return null;
 
   const cacheKey = generateCacheKey('cost', { area: listing.area, city: listing.location.city, type: request.buildingType, floors: request.floors, q: quality });
   
@@ -252,8 +228,11 @@ export const estimateConstructionCost = async (
   }
 }
 
-export const chatWithListingAgent = async (listing: Listing, history: {role: string, parts: {text: string}[]}[], message: string) => {
-    if (!getApiKey()) return "Chat unavailable without API Key.";
+export const chatWithListingAgent = async function* (listing: Listing, history: {role: string, parts: {text: string}[]}[], message: string) {
+    if (!process.env.API_KEY) {
+        yield "Chat unavailable without API Key.";
+        return;
+    }
 
     // Chat is real-time, no caching
     const ai = getAiClient();
@@ -261,23 +240,28 @@ export const chatWithListingAgent = async (listing: Listing, history: {role: str
         const chat = ai.chats.create({
             model: 'gemini-2.5-flash',
             config: {
-                maxOutputTokens: 60, // Very short responses for speed
-                systemInstruction: `Real Estate Agent for LandVision. Listing: ${listing.title}. Concise answers (<30 words).`,
+                // maxOutputTokens removed to allow natural streaming flow
+                systemInstruction: `Real Estate Agent for LandVision. Listing: ${listing.title}. Concise answers.`,
                 thinkingConfig: { thinkingBudget: 0 }
             },
             history: history
         });
 
-        const result = await chat.sendMessage({ message });
-        return result.text;
+        const result = await chat.sendMessageStream({ message });
+        for await (const chunk of result) {
+            const text = chunk.text;
+            if (text) {
+                yield text;
+            }
+        }
     } catch (e) {
         console.error("Chat Error", e);
-        return "Connection error.";
+        yield "Connection error.";
     }
 }
 
 export const searchLandWithAI = async (query: string, listings: Listing[]): Promise<string[]> => {
-    if (!getApiKey()) return listings.map(l => l.id); 
+    if (!process.env.API_KEY) return listings.map(l => l.id); 
     
     // Cache search queries
     const cacheKey = generateCacheKey('search', { q: query, listLen: listings.length });

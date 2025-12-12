@@ -35,10 +35,43 @@ const ListingChat: React.FC<{ listing: Listing }> = ({ listing }) => {
         parts: [{text: m.text}]
     }));
 
-    const response = await chatWithListingAgent(listing, history, userMsg);
-    
-    setMessages(prev => [...prev, {role: 'model', text: response}]);
-    setLoading(false);
+    try {
+        // Start streaming
+        const stream = chatWithListingAgent(listing, history, userMsg);
+        let fullResponse = "";
+        let isFirstChunk = true;
+
+        for await (const chunk of stream) {
+            fullResponse += chunk;
+            
+            if (isFirstChunk) {
+                // On first chunk, add the model message bubble
+                setMessages(prev => [...prev, {role: 'model', text: fullResponse}]);
+                isFirstChunk = false;
+            } else {
+                // On subsequent chunks, update the last message
+                setMessages(prev => {
+                    const newArr = [...prev];
+                    const lastIdx = newArr.length - 1;
+                    if (newArr[lastIdx].role === 'model') {
+                        newArr[lastIdx] = { ...newArr[lastIdx], text: fullResponse };
+                    }
+                    return newArr;
+                });
+            }
+        }
+        
+        // Safety check if stream yielded nothing (e.g. error handled inside generator)
+        if (isFirstChunk && fullResponse === "") {
+             setMessages(prev => [...prev, {role: 'model', text: "I'm having trouble connecting right now."}]);
+        }
+
+    } catch (e) {
+        console.error("Stream Error", e);
+        setMessages(prev => [...prev, {role: 'model', text: "Connection error."}]);
+    } finally {
+        setLoading(false);
+    }
   };
 
   if (!isOpen) {
@@ -68,15 +101,19 @@ const ListingChat: React.FC<{ listing: Listing }> = ({ listing }) => {
       <div className="flex-1 p-5 overflow-y-auto bg-gray-50 h-96 space-y-4">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] p-3.5 rounded-xl text-base ${msg.role === 'user' ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none shadow-sm'}`}>
+            <div className={`max-w-[85%] p-3.5 rounded-xl text-base whitespace-pre-wrap ${msg.role === 'user' ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none shadow-sm'}`}>
               {msg.text}
             </div>
           </div>
         ))}
-        {loading && (
+        
+        {/* Only show "Typing..." if we are loading AND the last message is from User (meaning we haven't started streaming model response yet) */}
+        {loading && messages.length > 0 && messages[messages.length-1].role === 'user' && (
             <div className="flex justify-start">
-                <div className="bg-gray-200 p-3 rounded-lg text-sm animate-pulse">
-                    Typing...
+                <div className="bg-gray-200 p-3 rounded-lg text-sm animate-pulse flex items-center">
+                    <span className="w-2 h-2 bg-gray-400 rounded-full mr-1 animate-bounce"></span>
+                    <span className="w-2 h-2 bg-gray-400 rounded-full mr-1 animate-bounce" style={{animationDelay: '0.2s'}}></span>
+                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></span>
                 </div>
             </div>
         )}
@@ -86,16 +123,17 @@ const ListingChat: React.FC<{ listing: Listing }> = ({ listing }) => {
       <div className="p-4 border-t bg-white rounded-b-xl flex gap-2">
         <input 
           type="text" 
-          className="flex-1 border border-gray-300 rounded-full px-5 py-3 text-base focus:outline-none focus:border-emerald-500"
+          className="flex-1 border border-gray-300 rounded-full px-5 py-3 text-base focus:outline-none focus:border-emerald-500 disabled:bg-gray-100 disabled:text-gray-400"
           placeholder="Type your question..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          disabled={loading}
         />
         <button 
             onClick={handleSend}
             disabled={loading}
-            className="bg-emerald-600 text-white p-3 rounded-full hover:bg-emerald-700 disabled:opacity-50"
+            className="bg-emerald-600 text-white p-3 rounded-full hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Send className="w-5 h-5" />
         </button>
